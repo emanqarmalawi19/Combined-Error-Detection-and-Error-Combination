@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Image Transmission HARQ Visualizer</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<!-- ===== HEADER ===== -->
+<header id="top">
+  <div class="header-inner">
+    <div class="header-logo">
+      <span class="logo-glyph">⟨/⟩</span>
+      <div>
+        <h1>HARQ Visualizer</h1>
+        <p class="tagline">JPEG Encoding · BPSK · AWGN · Chase Combining · IR-HARQ</p>
+      </div>
+    </div>
+    <nav class="header-nav">
+      <a href="#upload-section">Upload</a>
+      <a href="#encoding-section">Encoding</a>
+      <a href="#harq-section">HARQ</a>
+      <a href="#results-section">Results</a>
+    </nav>
+  </div>
+</header>
+
+<!-- ===== 01 UPLOAD ===== -->
+<section id="upload-section" class="section">
+  <div class="section-label">01 · IMAGE INPUT</div>
+  <h2 class="section-title">Upload Image</h2>
+
+  <div class="card drop-zone" id="dropZone">
+    <div class="drop-icon">↑</div>
+    <p class="drop-main">Drag &amp; drop an image, or click to browse</p>
+    <p class="drop-hint">JPG · PNG · BMP · GIF — auto-cropped to 8×8 multiples</p>
+    <input type="file" id="imageInput" accept="image/*" />
+    <button class="btn btn-primary" id="btnChoose">Choose Image</button>
+  </div>
+
+  <div id="image-preview-row" class="preview-row hidden">
+    <div class="card preview-card">
+      <div class="card-label">Original (cropped to 8×8 multiple)</div>
+      <canvas id="originalCanvas"></canvas>
+      <div class="img-meta" id="imgMeta"></div>
+    </div>
+    <div class="card preview-card">
+      <div class="card-label">Y · Cb · Cr Channels</div>
+      <div class="channel-trio">
+        <div class="channel-item"><canvas id="yCanvas"></canvas><span>Y (Luma)</span></div>
+        <div class="channel-item"><canvas id="cbCanvas"></canvas><span>Cb (Blue)</span></div>
+        <div class="channel-item"><canvas id="crCanvas"></canvas><span>Cr (Red)</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== 02 JPEG ENCODING ===== -->
+<section id="encoding-section" class="section hidden">
+  <div class="section-label">02 · JPEG-STYLE ENCODING</div>
+  <h2 class="section-title">Image → Bitstream Pipeline</h2>
+
+  <div class="card">
+    <div class="card-label">Encoding Pipeline</div>
+    <div class="pipeline" id="encodingPipeline">
+      <div class="pipe-step inactive" id="ps-rgb">RGB Image</div><div class="pipe-arrow">→</div>
+      <div class="pipe-step inactive" id="ps-ycbcr">YCbCr</div><div class="pipe-arrow">→</div>
+      <div class="pipe-step inactive" id="ps-blocks">8×8 Blocks</div><div class="pipe-arrow">→</div>
+      <div class="pipe-step inactive" id="ps-center">Level Shift</div><div class="pipe-arrow">→</div>
+      <div class="pipe-step inactive" id="ps-dct">2D DCT</div><div class="pipe-arrow">→</div>
+      <div class="pipe-step inactive" id="ps-quant">Quantize</div><div class="pipe-arrow">→</div>
+      <div class="pipe-step inactive" id="ps-bits">16-bit Coeffs</div><div class="pipe-arrow">→</div>
+      <div class="pipe-step inactive" id="ps-stream">Bitstream</div>
+    </div>
+    <div class="pipe-explanation" id="pipeExp">Waiting for image upload...</div>
+  </div>
+
+  <div class="card" id="bitstreamCard">
+    <div class="card-label">Generated Bitstream Preview (first 512 bits)</div>
+    <div id="bitstreamDisplay" class="bitstream-display"></div>
+    <div id="bitstreamStats" class="bitstream-stats"></div>
+  </div>
+
+  <div class="matrices-row">
+    <div class="card matrix-card">
+      <div class="card-label">Luminance Q-Matrix (Y)</div>
+      <div id="qMatrixY" class="matrix-grid"></div>
+    </div>
+    <div class="card matrix-card">
+      <div class="card-label">Chrominance Q-Matrix (Cb/Cr)</div>
+      <div id="qMatrixC" class="matrix-grid"></div>
+    </div>
+  </div>
+
+  <!-- NEW CARD: Result of Dividing by Q-Matrix -->
+  <div class="card matrix-card hidden" id="quantizedCard" style="margin-top: 18px; border-color: var(--accent);">
+    <div class="card-label" style="color: var(--accent2);">Result of Division: Quantized Coefficients (First 8x8 Y-Block)</div>
+    <div id="quantizedBlock" class="matrix-grid"></div>
+    <p style="font-size: 14px; color: var(--text-dim); margin-top: 14px; font-family: var(--mono); background: rgba(59,130,246,0.1); padding: 8px; border-radius: 5px;">
+      <strong>Notice:</strong> This is the mathematical result of (DCT Block ÷ Q-Matrix). High-frequency details (bottom-right) are rounded to <strong>0</strong>. This is how JPEG compression shrinks the data size!
+    </p>
+  </div>
+</section>
+
+<!-- ===== 03 HARQ CONFIGURATION ===== -->
+<section id="harq-section" class="section hidden">
+  <div class="section-label">03 · HARQ SYSTEM</div>
+  <h2 class="section-title">Select Mode &amp; Configure</h2>
+
+  <div class="mode-selector">
+    <button class="mode-btn active" data-mode="A">
+      <span class="mode-letter">A</span>
+      <span class="mode-name">Hard Decision<br>CRC + Chase</span>
+    </button>
+    <button class="mode-btn" data-mode="B">
+      <span class="mode-letter">B</span>
+      <span class="mode-name">IR-HARQ<br>with CRC</span>
+    </button>
+    <button class="mode-btn" data-mode="C">
+      <span class="mode-letter">C</span>
+      <span class="mode-name">CRC-less<br>IR-HARQ</span>
+    </button>
+  </div>
+
+  <div class="card mode-desc-card" id="modeDescription">
+    <div class="card-label">Mode A — Hard Decision CRC + Chase Combining HARQ</div>
+    <p>Splits the bitstream into k-bit blocks, appends CRC-8 (poly 0x2F), modulates with BPSK (0→+1, 1→−1), transmits through AWGN. On failure (NACK), re-transmits the <em>same</em> block and <strong>Chase-Combines</strong> received copies.</p>
+  </div>
+
+  <div class="card">
+    <div class="card-label">Simulation Parameters</div>
+    <div class="sliders-grid">
+      <div class="slider-row">
+        <label>Eb/N₀ <span class="slider-unit">dB</span></label>
+        <input type="range" id="slEbN0" min="-2" max="14" step="0.5" value="5" />
+        <span class="slider-val" id="valEbN0">5.0 dB</span>
+      </div>
+      <div class="slider-row">
+        <label>Max Transmissions M</label>
+        <input type="range" id="slM" min="1" max="6" step="1" value="3" />
+        <span class="slider-val" id="valM">3</span>
+      </div>
+      <div class="slider-row">
+        <label>Block Size k <span class="slider-unit">bits</span></label>
+        <input type="range" id="slK" min="256" max="2048" step="256" value="1024" />
+        <span class="slider-val" id="valK">1024</span>
+      </div>
+      <div class="slider-row" id="thresholdRow" style="display:none">
+        <label>CRC-less Threshold δ</label>
+        <input type="range" id="slThreshold" min="0.5" max="10" step="0.5" value="4" />
+        <span class="slider-val" id="valThreshold">4.0</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-label">System Block Diagram</div>
+    <div id="blockDiagram" class="block-diagram"></div>
+    <div class="block-explanation" id="blockExp"></div>
+  </div>
+
+  <div class="sim-controls">
+    <button class="btn btn-primary" id="btnStart" disabled>▶ Start Simulation</button>
+    <button class="btn btn-secondary" id="btnPause" disabled>⏸ Pause</button>
+    <button class="btn btn-secondary" id="btnStep" disabled>⏭ Step Next</button>
+    <button class="btn btn-secondary" id="btnFastForward" disabled>⏩ Fast Forward</button>
+    <button class="btn btn-danger" id="btnReset" disabled>↺ Reset</button>
+  </div>
+  
+  <!-- ===== DEEP DIVE: FIRST NACK ===== -->
+  <div class="card hidden" id="firstNackCard" style="border-color: var(--red); box-shadow: 0 0 20px rgba(239,68,68,0.2);">
+    <div class="card-label" style="color: var(--red); font-size: 14px;">Deep Dive: First Block to Experience Errors (NACK)</div>
+    <div style="display: flex; flex-wrap: wrap; gap: 20px;">
+      
+      <div id="firstNackLog" class="sim-log" style="flex: 1; min-width: 300px; max-height: 320px; font-size: 15px;"></div>
+      
+      <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; background: var(--bg2); padding: 15px; border-radius: 8px; border: 1px solid var(--card-border);">
+        <p style="font-family: var(--mono); font-size: 13px; margin-bottom: 12px; color: var(--text-dim); text-align: center;">
+          Bit Error Map (1024 bits)<br>
+          <span style="color:var(--green)">Green = Correct</span> | <span style="color:var(--red)">Red = Flipped</span>
+        </p>
+        <canvas id="firstNackCanvas" width="256" height="256" style="background: #000; border-radius: 6px; box-shadow: inset 0 0 10px #000;"></canvas>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ===== 04 RESULTS ===== -->
+<section id="results-section" class="section hidden">
+  <div class="section-label">04 · RESULTS &amp; STATISTICS</div>
+  <h2 class="section-title">Simulation Results</h2>
+
+  <div class="stats-bar" id="statsBar">
+    <div class="stat-box"><span class="stat-val" id="st-total">—</span><span class="stat-lbl">Total Blocks</span></div>
+    <div class="stat-box stat-green"><span class="stat-val" id="st-ack">—</span><span class="stat-lbl">ACK Blocks</span></div>
+    <div class="stat-box stat-red"><span class="stat-val" id="st-nack">—</span><span class="stat-lbl">NACK Blocks</span></div>
+    <div class="stat-box"><span class="stat-val" id="st-retx">—</span><span class="stat-lbl">Retransmissions</span></div>
+    <div class="stat-box"><span class="stat-val" id="st-errors">—</span><span class="stat-lbl">Bit Errors</span></div>
+    <div class="stat-box"><span class="stat-val" id="st-ber">—</span><span class="stat-lbl">BER</span></div>
+  </div>
+
+  <div class="card">
+    <div class="card-label">ACK / NACK Timeline (per block)</div>
+    <canvas id="timelineCanvas" width="900" height="80"></canvas>
+  </div>
+
+  <div class="card">
+    <div class="card-label">Live Block Statistics</div>
+    <canvas id="barChart" width="900" height="180"></canvas>
+  </div>
+
+  <div class="card">
+    <div class="card-label">Image Reconstruction Comparison</div>
+    <div class="recon-row">
+      <div class="recon-item">
+        <canvas id="reconOrigCanvas"></canvas>
+        <span>Original</span>
+      </div>
+      <div class="recon-item">
+        <canvas id="reconJpegCanvas"></canvas>
+        <span>JPEG (Perfect conditions)</span>
+      </div>
+      <div class="recon-item">
+        <canvas id="reconRxCanvas"></canvas>
+        <span>After HARQ Transmission</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-label">Detailed Transmission Log</div>
+    <div id="simLog" class="sim-log"></div>
+  </div>
+</section>
+
+<!-- ===== IMAGE MODAL ===== -->
+<div id="imageModal" class="modal hidden">
+  <span class="close-modal" id="closeModal">&times;</span>
+  <img class="modal-content" id="modalImage">
+</div>
+
+<script src="script.js"></script>
+</body>
+</html>
