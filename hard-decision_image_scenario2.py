@@ -89,91 +89,92 @@ def awgn_channel(symbols, ebn0_db, code_rate=1.0, rng=None):  # Sends BPSK symbo
     return symbols + noise  # Add noise to the transmitted symbols.
 
 
-def hard_decision_harq_for_bitstream(input_bits, k=1024, M=3, ebn0_db=6.0, seed=7, verbose_blocks=10):
-    original_length = len(input_bits)  
-    rng = np.random.default_rng(seed)  
+def hard_decision_harq_for_bitstream(input_bits, k=1024, M=3, ebn0_db=6.0, seed=7, verbose_blocks=10):  # Define HARQ function for a bitstream
+    original_length = len(input_bits)  # Save original number of bits before padding
+    rng = np.random.default_rng(seed)  # Create random generator for AWGN noise
 
-    pad_len = (-original_length) % k  
-    if pad_len > 0:  
-        input_bits = np.concatenate([input_bits, np.zeros(pad_len, dtype=np.uint8)])  
+    pad_len = (-original_length) % k  # Calculate how many zeros are needed to complete the last block
+    if pad_len > 0:  # Check if padding is needed
+        input_bits = np.concatenate([input_bits, np.zeros(pad_len, dtype=np.uint8)])  # Add zeros at the end
 
-    received_payload_bits = []           
-    total_blocks = len(input_bits) // k  
-    ack_blocks = 0   
-    nack_blocks = 0  
+    received_payload_bits = []  # List to store decoded payload bits
+    total_blocks = len(input_bits) // k  # Number of blocks after padding
+    ack_blocks = 0  # Counter for blocks that pass CRC
+    nack_blocks = 0  # Counter for blocks that fail after all transmissions
 
-    print(f"Total image bits entering Hard-Dec CRC + HARQ: {original_length:,}")  
-    print(f"Block payload size k = {k}")     
-    print(f"Total blocks = {total_blocks}")  
-    print(f"Eb/N0 = {ebn0_db} dB")           
-    print(f"Max transmissions M = {M}")      
+    print(f"Total image bits entering Hard-Dec CRC + HARQ: {original_length:,}")  # Print original bit length
+    print(f"Block payload size k = {k}")  # Print block size
+    print(f"Total blocks = {total_blocks}")  # Print number of blocks
+    print(f"Eb/N0 = {ebn0_db} dB")  # Print channel Eb/N0 value
+    print(f"Max transmissions M = {M}")  # Print maximum allowed transmissions
 
-    printed_first_nack = False  
+    printed_first_nack = False  # Used to print only the first NACK after early blocks
 
-    for block_index in range(total_blocks):  
-        u = input_bits[block_index * k:(block_index + 1) * k]  
-        x = crc_encode(u)       
-        code_rate = k / len(x)  
+    for block_index in range(total_blocks):  # Loop through all blocks
+        u = input_bits[block_index * k:(block_index + 1) * k]  # Extract current block of k bits
+        x = crc_encode(u)  # Add CRC bits to the payload block
+        code_rate = k / len(x)  # Calculate code rate = data bits / transmitted bits
 
-        rx_buffer = []        
-        block_passed = False  
-        last_u_hat = None     
+        rx_buffer = []  # Store received signals from each transmission
+        block_passed = False  # Flag to know if CRC passed for this block
+        last_u_hat = None  # Store latest decoded payload estimate
 
-        is_early_block = block_index < verbose_blocks  
+        is_early_block = block_index < verbose_blocks  # True if this block should be printed in detail
         
-        block_log = [] 
+        block_log = []  # Store log messages for this block
 
-        block_log.append(f"\n========== Block {block_index + 1}/{total_blocks} ==========")
+        block_log.append(f"\n========== Block {block_index + 1}/{total_blocks} ==========")  # Add block header
 
-        for tx_num in range(1, M + 1):  
-            tx_symbols = bpsk_mod(x)  
-            rx_symbols = awgn_channel(tx_symbols, ebn0_db, code_rate, rng)  
+        for tx_num in range(1, M + 1):  # Try transmitting this block up to M times
+            tx_symbols = bpsk_mod(x)  # Convert bits to BPSK symbols
+            rx_symbols = awgn_channel(tx_symbols, ebn0_db, code_rate, rng)  # Add AWGN noise to transmitted symbols
 
-            rx_buffer.append(rx_symbols)  
+            rx_buffer.append(rx_symbols)  # Save received noisy symbols
 
-            combined_soft = np.sum(np.vstack(rx_buffer), axis=0)  
-            x_hat = (combined_soft < 0).astype(np.uint8)  
+            combined_soft = np.sum(np.vstack(rx_buffer), axis=0)  # Combine all retransmissions symbol by symbol
+            x_hat = (combined_soft < 0).astype(np.uint8)  # Hard decision: negative becomes 1, positive becomes 0
 
-            passed, u_hat = crc_check(x_hat)  
-            last_u_hat = u_hat                
+            passed, u_hat = crc_check(x_hat)  # Check CRC and extract decoded payload bits
+            last_u_hat = u_hat  # Save latest decoded payload bits
 
-            if passed:  
-                block_log.append("CRC check: PASS")  
-                block_log.append(f"ACK: decoded correctly after {tx_num} transmissions.")  
-                block_log.append("Final decision: ACK")  
+            if passed:  # If CRC passed
+                block_log.append("CRC check: PASS")  # Log CRC success
+                block_log.append(f"ACK: decoded correctly after {tx_num} transmissions.")  # Log ACK and transmission count
+                block_log.append("Final decision: ACK")  # Log final ACK decision
 
-                received_payload_bits.extend(u_hat)  
-                ack_blocks += 1      
-                block_passed = True  
-                break  
+                received_payload_bits.extend(u_hat)  # Add decoded payload bits to output
+                ack_blocks += 1  # Increase ACK block counter
+                block_passed = True  # Mark block as successfully decoded
+                break  # Stop retransmissions for this block
 
-            else:  
-                block_log.append(f"Transmission {tx_num}: CRC check: FAIL")  
-                block_log.append("NACK: retransmission requested.")          
+            else:  # If CRC failed
+                block_log.append(f"Transmission {tx_num}: CRC check: FAIL")  # Log failed transmission
+                block_log.append("NACK: retransmission requested.")  # Log NACK request
 
-        if not block_passed:  
-            block_log.append(f"CRC check: FAIL after {M} transmissions.")  
-            block_log.append("Final decision: NACK")                       
+        if not block_passed:  # If CRC did not pass after M transmissions
+            block_log.append(f"CRC check: FAIL after {M} transmissions.")  # Log final CRC failure
+            block_log.append("Final decision: NACK")  # Log final NACK decision
 
-            received_payload_bits.extend(last_u_hat)  
-            nack_blocks += 1  
+            received_payload_bits.extend(last_u_hat)  # Store the last decoded estimate even though CRC failed
+            nack_blocks += 1  # Increase NACK block counter
 
-        if is_early_block:
-            print("\n".join(block_log))
-        elif not block_passed and not printed_first_nack:
-            print("\n--- FIRST NACK ENCOUNTERED ---")
-            print("\n".join(block_log))
-            printed_first_nack = True #true so we don't print any more NACKs
+        if is_early_block:  # If this is one of the first verbose blocks
+            print("\n".join(block_log))  # Print detailed log for this block
 
-    received_payload_bits = np.array(received_payload_bits, dtype=np.uint8)  
-    received_payload_bits = received_payload_bits[:original_length]          
+        elif not block_passed and not printed_first_nack:  # If this is the first later NACK block
+            print("\n--- FIRST NACK ENCOUNTERED ---")  # Print first NACK header
+            print("\n".join(block_log))  # Print this failed block log
+            printed_first_nack = True  # Prevent printing more later NACKs
 
-    print("\n========== Hard-Decision CRC + HARQ SUMMARY ==========")  
-    print(f"Total blocks: {total_blocks}")  
-    print(f"ACK blocks: {ack_blocks}")      
-    print(f"NACK blocks: {nack_blocks}")    
+    received_payload_bits = np.array(received_payload_bits, dtype=np.uint8)  # Convert output list to NumPy uint8 array
+    received_payload_bits = received_payload_bits[:original_length]  # Remove padding bits and keep original length
 
-    return received_payload_bits
+    print("\n========== Hard-Decision CRC + HARQ SUMMARY ==========")  # Print summary header
+    print(f"Total blocks: {total_blocks}")  # Print total processed blocks
+    print(f"ACK blocks: {ack_blocks}")  # Print successful blocks
+    print(f"NACK blocks: {nack_blocks}")  # Print failed blocks
+
+    return received_payload_bits  # Return final recovered bitstream
 
 
 # ============================================================
