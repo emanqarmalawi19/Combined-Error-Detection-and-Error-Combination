@@ -89,7 +89,7 @@ def awgn_channel(symbols, ebn0_db, code_rate=1.0, rng=None):  # Sends BPSK symbo
     return symbols + noise  # Add noise to the transmitted symbols.
 
 
-def hard_decision_harq_for_bitstream(input_bits, k=1024, M=3, ebn0_db=6.0, seed=7, verbose_blocks=10):  # Define HARQ function for a bitstream
+def hard_decision_harq_for_bitstream(input_bits, k=1024, M=3, ebn0_db=6.0, seed=7, verbose_blocks=10):  
     original_length = len(input_bits)  # Save original number of bits before padding
     rng = np.random.default_rng(seed)  # Create random generator for AWGN noise
 
@@ -123,7 +123,7 @@ def hard_decision_harq_for_bitstream(input_bits, k=1024, M=3, ebn0_db=6.0, seed=
         
         block_log = []  # Store log messages for this block
 
-        block_log.append(f"\n========== Block {block_index + 1}/{total_blocks} ==========")  # Add block header
+        block_log.append(f"\n========== Block {block_index + 1}/{total_blocks} ==========") 
 
         for tx_num in range(1, M + 1):  # Try transmitting this block up to M times
             tx_symbols = bpsk_mod(x)  # Convert bits to BPSK symbols
